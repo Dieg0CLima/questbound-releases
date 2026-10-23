@@ -1,0 +1,41 @@
+# QB-273 (ADR 0023): ESTE ARQUIVO VIVE NO REPOSITÓRIO PÚBLICO DE RELEASES (Dieg0CLima/questbound-releases),
+# em .github/workflows/updater-manifest.yml; aqui fica só a cópia versionada. Quando uma pessoa PUBLICA uma release, o latest.json dela vira o manifesto
+# fixo que os apps instalados consultam (release `updater`, URL estável). Rascunhos não disparam
+# este fluxo, então só o que foi publicado de propósito chega aos usuários.
+name: Updater manifest
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  manifest:
+    # A própria release `updater` também dispara `published`; sem este guard haveria laço.
+    if: github.event.release.tag_name != 'updater'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - name: Download latest.json from the published release
+        run: |
+          mkdir out
+          if ! gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir out; then
+            echo "A release $TAG não tem latest.json (build sem chave de assinatura): nada a publicar para o updater."
+            exit 0
+          fi
+          echo "HAS_MANIFEST=true" >> "$GITHUB_ENV"
+
+      - name: Ensure the fixed `updater` release exists
+        if: env.HAS_MANIFEST == 'true'
+        run: |
+          gh release view updater --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create updater --repo "$GITHUB_REPOSITORY" --title "Updater manifest" \
+              --notes "Manifesto fixo do updater. Não apague: os apps instalados consultam latest.json daqui." --latest=false
+
+      - name: Publish latest.json
+        if: env.HAS_MANIFEST == 'true'
+        run: gh release upload updater out/latest.json --repo "$GITHUB_REPOSITORY" --clobber
